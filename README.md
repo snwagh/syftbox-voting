@@ -1,3 +1,3 @@
-# Branches: 
-- `snark-circom`: A PoC using SnarkJS and CIRCOM
-- `distributed-decryption`: Some basic notebooks around the Distributed Key Gen setup and Distributed Decryption
+# Run 
+- Clone the [lattigo library](https://github.com/tuneinsight/lattigo) and add this go file in there. 
+- `go run distributed`: This will run the full flow on a single machine
