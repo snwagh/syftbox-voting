@@ -1,0 +1,65 @@
+[
+    {
+      "prompt": "What is the capital of Japan?",
+      "expected_response": "The capital of Japan is Tokyo.",
+      "facts": ["Tokyo", "capital", "Japan"],
+      "keywords": ["Tokyo"]
+    },
+    {
+      "prompt": "Write a function in Python to calculate the Fibonacci sequence up to n terms.",
+      "keywords": ["def", "fibonacci", "for loop", "return", "append"],
+      "facts": ["recursive", "sequence", "0, 1, 1, 2, 3, 5"]
+    },
+    {
+      "prompt": "Explain the concept of object-oriented programming in one paragraph.",
+      "keywords": ["class", "object", "inheritance", "encapsulation", "polymorphism"],
+      "facts": ["paradigm", "objects", "methods", "attributes", "classes"]
+    },
+    {
+      "prompt": "What are the first five elements in the periodic table?",
+      "expected_response": "The first five elements in the periodic table are Hydrogen (H), Helium (He), Lithium (Li), Beryllium (Be), and Boron (B).",
+      "facts": ["Hydrogen", "Helium", "Lithium", "Beryllium", "Boron"],
+      "keywords": ["Hydrogen", "Helium", "periodic table"]
+    },
+    {
+      "prompt": "Summarize the plot of Romeo and Juliet in one paragraph.",
+      "facts": ["Montague", "Capulet", "love", "tragedy", "suicide", "Verona"],
+      "keywords": ["Romeo", "Juliet", "Shakespeare", "love", "tragedy"]
+    },
+    {
+      "prompt": "Explain how a neural network works.",
+      "facts": ["neurons", "weights", "activation function", "layers", "backpropagation"],
+      "keywords": ["neural", "network", "weights", "layers", "training"]
+    },
+    {
+      "prompt": "Give three examples of renewable energy sources.",
+      "expected_response": "Three examples of renewable energy sources are solar energy, wind energy, and hydroelectric power.",
+      "facts": ["solar", "wind", "hydroelectric", "renewable"],
+      "keywords": ["solar", "wind", "renewable"]
+    },
+    {
+      "prompt": "What is the difference between HTTP and HTTPS?",
+      "facts": ["encryption", "secure", "SSL", "TLS", "certificate"],
+      "keywords": ["HTTP", "HTTPS", "encryption", "secure"]
+    },
+    {
+      "prompt": "Write a short poem about artificial intelligence.",
+      "keywords": ["intelligence", "learn", "future", "machine", "human"]
+    },
+    {
+      "prompt": "Explain the concept of climate change and its main causes.",
+      "facts": ["greenhouse gases", "global warming", "carbon dioxide", "human activity", "fossil fuels"],
+      "keywords": ["climate", "change", "warming", "emissions", "carbon"]
+    },
+    {
+    "prompt": "What is the significance of the Pythagorean theorem?",
+    "expected_response": "The Pythagorean theorem states that in a right-angled triangle, the square of the length of the hypotenuse is equal to the sum of the squares of the lengths of the other two sides.",
+    "facts": ["right-angled triangle", "hypotenuse", "sides", "square"],
+    "keywords": ["Pythagorean", "theorem", "triangle"]
+    },
+    {
+    "prompt": "Describe the process of photosynthesis.",
+    "facts": ["chlorophyll", "sunlight", "carbon dioxide", "glucose", "oxygen"],
+    "keywords": ["photosynthesis", "plants", "energy"]
+    }
+]
