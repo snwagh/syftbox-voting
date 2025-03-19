@@ -8,11 +8,13 @@ import os
 import re
 import traceback
 import secrets
+import hashlib
 from typing import List, Dict, Any, Optional, Tuple
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
+from cryptography.exceptions import InvalidSignature
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -50,6 +52,12 @@ class SecureOllamaClient:
         self.server_public_key = serialization.load_pem_public_key(
             self.server_public_key_pem.encode('utf-8'),
             backend=default_backend()
+        )
+        
+        # Initialize the attestation verifier
+        self.attestation_verifier = AttestationVerifier(
+            server_url=server_url,
+            server_public_key_pem=self.server_public_key_pem
         )
     
     def _get_server_public_key(self) -> str:
@@ -175,14 +183,25 @@ class SecureOllamaClient:
             raise RuntimeError(f"Failed to decrypt data: {str(e)}")
     
     def generate(self, prompt: str, model: str = "llama2", temperature: float = 0.7,
-                system_prompt: Optional[str] = None) -> Dict[str, Any]:
+                system_prompt: Optional[str] = None, verify_attestation: bool = True) -> Dict[str, Any]:
         """
         Generate a response securely using hybrid encryption
         
         1. Encrypt the request data with hybrid RSA+AES encryption
         2. Send the encrypted request to the server
         3. Decrypt the response with hybrid RSA+AES decryption
-        4. Return the decrypted response
+        4. Verify the attestation (optional)
+        5. Return the decrypted response
+        
+        Args:
+            prompt: The prompt to send to the model
+            model: The name of the model to use
+            temperature: The temperature parameter for generation
+            system_prompt: Optional system prompt
+            verify_attestation: Whether to verify the attestation
+            
+        Returns:
+            Dict containing the response and attestation information
         """
         # Prepare request data
         request_data = {
@@ -230,7 +249,15 @@ class SecureOllamaClient:
                 response_json["encrypted_data"],
                 response_json["iv"]
             )
-            print(f"Decrypted response: {decrypted_response}")
+            print(f"Decrypted response received")
+            
+            # Verify attestation if requested
+            if verify_attestation:
+                verification_result = self.attestation_verifier.full_verification(decrypted_response)
+                decrypted_response['verification_result'] = verification_result
+                
+                if not verification_result['verified']:
+                    print(f"WARNING: Attestation verification failed: {verification_result['reason']}")
             
             return decrypted_response
         except requests.exceptions.RequestException as e:
@@ -243,6 +270,169 @@ class SecureOllamaClient:
             print(f"Error in secure generation: {str(e)}")
             print(f"Traceback: {traceback.format_exc()}")
             raise RuntimeError(f"Error in secure generation: {str(e)}")
+
+
+class AttestationVerifier:
+    """
+    Helper class to verify attestations from the secure server
+    """
+    def __init__(self, server_url, server_public_key_pem=None):
+        """
+        Initialize verifier with server URL and optional pre-known public key
+        """
+        self.server_url = server_url
+        
+        # Fetch server's public key if not provided
+        if server_public_key_pem:
+            self.server_public_key_pem = server_public_key_pem
+        else:
+            response = requests.get(f"{server_url}/api/public-key")
+            response.raise_for_status()
+            self.server_public_key_pem = response.json()["public_key"]
+        
+        # Load server's public key
+        self.server_public_key = serialization.load_pem_public_key(
+            self.server_public_key_pem.encode()
+        )
+        
+        # Calculate key fingerprint
+        self.key_fingerprint = hashlib.sha256(self.server_public_key_pem.encode()).hexdigest()
+        
+    def verify_response_attestation(self, response):
+        """
+        Verify attestation information in a response
+        
+        Args:
+            response: The decrypted response from the server
+            
+        Returns:
+            dict: Verification result with details
+        """
+        if 'attestation' not in response:
+            return {
+                'verified': False,
+                'reason': 'No attestation information found in response'
+            }
+        
+        attestation = response['attestation']
+        
+        # Check if all required fields are present
+        required_fields = ['request_id', 'timestamp', 'prompt_hash', 'response_hash', 'signature']
+        missing_fields = [field for field in required_fields if field not in attestation]
+        
+        if missing_fields:
+            return {
+                'verified': False,
+                'reason': f'Missing attestation fields: {", ".join(missing_fields)}'
+            }
+        
+        # Verify the signature
+        try:
+            # Reconstruct the data that was signed
+            signature_data = {
+                'request_id': attestation['request_id'],
+                'timestamp': attestation['timestamp'],
+                'fingerprint': self.key_fingerprint
+            }
+            
+            # Encode the data
+            data = json.dumps(signature_data, sort_keys=True).encode()
+            
+            # Verify the signature
+            signature = base64.b64decode(attestation['signature'])
+            
+            self.server_public_key.verify(
+                signature,
+                data,
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH
+                ),
+                hashes.SHA256()
+            )
+            
+            # If we get here without an exception, the signature is valid
+            return {
+                'verified': True,
+                'attestation': attestation
+            }
+            
+        except InvalidSignature:
+            return {
+                'verified': False,
+                'reason': 'Invalid signature'
+            }
+        except Exception as e:
+            return {
+                'verified': False,
+                'reason': f'Error verifying signature: {str(e)}'
+            }
+    
+    def verify_server_log(self, request_id):
+        """
+        Verify that a request is properly logged in the server's attestation log
+        
+        Args:
+            request_id: The ID of the request to verify
+            
+        Returns:
+            dict: Verification result with details
+        """
+        try:
+            # Query the server for attestation verification
+            response = requests.get(f"{self.server_url}/api/attestation/verify/{request_id}")
+            
+            if response.status_code != 200:
+                return {
+                    'verified': False,
+                    'reason': f'Server returned error: {response.status_code}'
+                }
+                
+            verification_result = response.json()
+            return verification_result
+            
+        except Exception as e:
+            return {
+                'verified': False,
+                'reason': f'Error verifying server log: {str(e)}'
+            }
+    
+    def full_verification(self, response):
+        """
+        Perform full verification of a response
+        
+        1. Verify the response attestation (signature)
+        2. Verify the server log entry
+        
+        Args:
+            response: The decrypted response from the server
+            
+        Returns:
+            dict: Full verification result
+        """
+        # First verify the attestation in the response
+        attestation_result = self.verify_response_attestation(response)
+        
+        if not attestation_result['verified']:
+            return attestation_result
+            
+        # Then verify the server log
+        request_id = attestation_result['attestation']['request_id']
+        log_result = self.verify_server_log(request_id)
+        
+        if not log_result.get('verified', False):
+            return {
+                'verified': False,
+                'reason': f'Server log verification failed: {log_result.get("message", "Unknown error")}',
+                'attestation_verified': True
+            }
+            
+        # All checks passed
+        return {
+            'verified': True,
+            'attestation': attestation_result['attestation'],
+            'log_entries': log_result.get('log_entries', [])
+        }
 
 
 class SecureOllamaEvaluator:
@@ -263,14 +453,14 @@ class SecureOllamaEvaluator:
             self.available_models = []
 
     def generate(self, prompt: str, model: str = "llama2", temperature: float = 0.7,
-                 system_prompt: str = None) -> Dict[str, Any]:
+                 system_prompt: str = None, verify_attestation: bool = True) -> Dict[str, Any]:
         """Generate a response from the model with optional system prompt"""
         if model not in self.available_models:
             print(f"Warning: Model '{model}' not found in available models. Will attempt anyway.")
         
         start_time = time.time()
         try:
-            result = self.client.generate(prompt, model, temperature, system_prompt)
+            result = self.client.generate(prompt, model, temperature, system_prompt, verify_attestation)
             end_time = time.time()
             result['latency'] = end_time - start_time
             return result
@@ -343,6 +533,10 @@ class SecureOllamaEvaluator:
             'expected_response': expected,
             'latency': response_data.get('latency', 0),
         }
+        
+        # Add attestation verification results if available
+        if 'verification_result' in response_data:
+            evaluation['attestation_verified'] = response_data['verification_result']['verified']
         
         # Add metrics
         if expected:
@@ -489,6 +683,19 @@ def create_visualizations(results, output_dir):
         plt.tight_layout()
         plt.savefig(os.path.join(output_dir, 'secure_metrics_breakdown.png'))
     
+    # 4. Add attestation verification chart if available
+    if 'attestation_verified' in detailed.columns:
+        attestation_verified = detailed.groupby('model')['attestation_verified'].mean() * 100
+        
+        plt.figure(figsize=(10, 6))
+        bars = plt.barh(attestation_verified.index, attestation_verified.values, color='lightcoral')
+        plt.xlabel('Attestation Verification Success (%)')
+        plt.ylabel('Model')
+        plt.title('Attestation Verification Success Rate (Secure Evaluation)')
+        plt.xlim(0, 100)
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, 'secure_attestation_verification.png'))
+    
     print(f"Visualizations saved as PNG files in {output_dir}/")
 
 
@@ -552,7 +759,7 @@ def run_evaluation():
     
     # Run the evaluation
     print(f"\nRunning secure evaluation on {len(eval_dataset)} examples with {len(models_to_evaluate)} models...")
-    print("All communication with the server is encrypted.")
+    print("All communication with the server is encrypted and attested.")
     results = evaluator.compare_models_detailed(eval_dataset, models_to_evaluate)
     
     # Print summary results

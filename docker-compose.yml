@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama-service
+    restart: unless-stopped
+    volumes:
+      - ollama-data:/root/.ollama
+    # Not exposing directly to host - only accessible to the eval server
+    expose:
+      - "11434"
+    networks:
+      - ollama-eval-network
+    # Apply resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+    # Run Ollama in read-only mode with no capabilities
+    read_only: true
+    security_opt:
+      - no-new-privileges=true
+    # Start ollama server
+    command: serve
+    # Setup to download llama3.2 model
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    
+  # Service to pull the model
+  model-loader:
+    image: ollama/ollama:latest
+    container_name: model-loader
+    depends_on:
+      ollama:
+        condition: service_healthy
+    command: pull llama3.2:1b
+    networks:
+      - ollama-eval-network
+    restart: "no"
+    environment:
+      - OLLAMA_HOST=http://ollama-service:11434
+    
+  eval-server:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: eval-server
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./logs:/app/logs:rw
+    depends_on:
+      - ollama
+    networks:
+      - ollama-eval-network
+    environment:
+      - OLLAMA_BASE_URL=http://ollama-service:11434
+
+volumes:
+  ollama-data:
+    driver: local
+
+networks:
+  ollama-eval-network:
+    driver: bridge
